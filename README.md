@@ -154,11 +154,11 @@ LineSentry leverages PLCs + Raspberry Pi to ingest real-time signals from generi
 
 ## 10. Architecture <a name="architecture"></a>
 
-<img width="1877" height="705" alt="arch-diag-line-sentry" src="https://github.com/user-attachments/assets/bfa6163d-5df1-4389-a179-30066e4d9a6e" />
+<img width="1922" height="836" alt="sunny-shaban-ali-line-sentry-arch" src="https://github.com/user-attachments/assets/f8e3f289-1dbb-48ab-9187-71b289f98042" />
 
 ## 11. Miscellaneous <a name="miscllaneous"></a>
 
-![setup-line-sentry](https://github.com/user-attachments/assets/b26964fb-bb9e-402f-97d5-bf8a76f7d8a7)
+![sunny-shaban-ali-line-sentry-testing-0](https://github.com/user-attachments/assets/4d09144d-5692-4c24-a618-ceb7a1859a01)
 
-![line-sentry-setup](https://github.com/user-attachments/assets/efa331f9-c634-4626-89ce-ce2b80e7a569)
+![sunny-shaban-ali-line-sentry-testing-1](https://github.com/user-attachments/assets/f2fa6f8a-6d13-4275-a9fe-bf9f5cb1ed6c)
 
