@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useContext } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Machine, MachineStats, MachineStatus } from '../types';
-import apiService from '../services/api';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { fetchMachine, updateMachine, updateMachineStatus } from '../store/slices/machineSlice';
+import { addStoppageRecord, updateProductionAssignment } from '../store/slices/analyticsSlice';
+import { MachineStatus } from '../types';
 import socketService from '../services/socket';
 import ProductionTimeline from './ProductionTimeline';
 import { ToastContainer, toast } from 'react-toastify';
@@ -25,16 +27,17 @@ import { ThemeContext } from '../App';
 const MachineView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const dispatch = useAppDispatch();
+  const { currentMachine: machine } = useAppSelector((state) => state.machines);
+  const { machineStatuses } = useAppSelector((state) => state.machines);
   const { isDarkMode } = useContext(ThemeContext);
-  const [machine, setMachine] = useState<Machine | null>(null);
-  const [stats, setStats] = useState<MachineStats | null>(null);
-  const [ytdStats, setYtdStats] = useState<MachineStats | null>(null);
+  const [stats, setStats] = useState<any | null>(null);
+  const [ytdStats, setYtdStats] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState<'today' | 'week' | 'month' | 'year' | 'custom'>('today');
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
   const [appliedCustomDates, setAppliedCustomDates] = useState({ start: '', end: '' });
-  const [machineStatus, setMachineStatus] = useState<string>('inactive');
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({
     name: '',
@@ -151,6 +154,7 @@ const MachineView: React.FC = () => {
 
   useEffect(() => {
     if (id) {
+      dispatch(fetchMachine(id));
       fetchMachineData();
       setupSocketListeners();
     }
@@ -165,14 +169,13 @@ const MachineView: React.FC = () => {
     try {
       const now = new Date();
       const ytdStart = formatUTCDate(startOfYear(now));
-      const response = await apiService.request(`/analytics/machine-stats/${id}`, {
-        method: 'GET',
-        params: {
-          startDate: ytdStart,
-          endDate: formatUTCDate(now)
-        }
+      const response = await fetch(`http://localhost:3001/api/analytics/machine-stats/${id}?startDate=${ytdStart}&endDate=${formatUTCDate(now)}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        },
       });
-      setYtdStats(response);
+      const data = await response.json();
+      setYtdStats(data);
     } catch (err) {
       console.error('Failed to fetch YTD stats:', err);
     }
@@ -225,8 +228,10 @@ const MachineView: React.FC = () => {
 
     const handleMachineStateUpdate = (update: any) => {
       if (update.machineId === id) {
-        setMachineStatus(update.status);
-        setMachine(prev => prev ? { ...prev, status: update.dbStatus } : null);
+        dispatch(updateMachineStatus({
+          machineId: update.machineId,
+          status: update.dbStatus
+        }));
       }
     };
 
@@ -250,23 +255,15 @@ const MachineView: React.FC = () => {
   const fetchMachineData = async () => {
     try {
       setLoading(true);
-      const machineData = await apiService.getMachine(id!);
-      
-      setMachine(machineData);
-      setEditForm({
-        name: machineData.name,
-        description: machineData.description || ''
-      });
-
       
       // Fetch stats for selected period
       const { startDate, endDate } = getDateRange();
-      const [statsData] = await Promise.all([
-        apiService.request(`/analytics/machine-stats/${id}`, {
-          method: 'GET',
-          params: { startDate, endDate }
-        })
-      ]);
+      const response = await fetch(`http://localhost:3001/api/analytics/machine-stats/${id}?startDate=${startDate}&endDate=${endDate}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+      const statsData = await response.json();
       
       setStats(statsData);
     } catch (err) {
@@ -280,13 +277,12 @@ const MachineView: React.FC = () => {
   const fetchStats = async () => {
     try {
       const { startDate, endDate } = getDateRange();
-      const statsData = await apiService.request(`/analytics/machine-stats/${id}`, {
-        method: 'GET',
-        params: {
-          startDate,
-          endDate
-        }
+      const response = await fetch(`http://localhost:3001/api/analytics/machine-stats/${id}?startDate=${startDate}&endDate=${endDate}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        },
       });
+      const statsData = await response.json();
       setStats(statsData);
     } catch (err) {
       console.error('Failed to fetch stats:', err);
@@ -295,10 +291,10 @@ const MachineView: React.FC = () => {
 
   const handleAddStoppage = async (stoppage: any) => {
     try {
-      await apiService.addStoppageRecord({
+      await dispatch(addStoppageRecord({
         ...stoppage,
         machineId: id
-      });
+      }));
       toast.success('Stoppage recorded successfully');
       fetchMachineData();
     } catch (err) {
@@ -308,12 +304,12 @@ const MachineView: React.FC = () => {
 
   const handleUpdateProduction = async (machineId: string, hour: number, date: string, data: any) => {
     try {
-      await apiService.updateProductionAssignment({
+      await dispatch(updateProductionAssignment({
         machineId,
         hour,
         date,
         ...data
-      });
+      }));
       toast.success('Production data updated');
       fetchStats();
       fetchMachineData();
@@ -331,14 +327,23 @@ const MachineView: React.FC = () => {
     if (!machine || !id) return;
     
     try {
-      const updatedMachine = await apiService.updateMachine(id, editForm);
-      setMachine(updatedMachine);
+      await dispatch(updateMachine({ id, data: editForm }));
       setIsEditing(false);
       toast.success('Machine details updated');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update machine');
     }
   };
+
+  // Update edit form when machine changes
+  useEffect(() => {
+    if (machine) {
+      setEditForm({
+        name: machine.name,
+        description: machine.description || ''
+      });
+    }
+  }, [machine]);
 
   const getStatusColor = (status: MachineStatus) => {
     switch (status) {
@@ -445,9 +450,9 @@ const MachineView: React.FC = () => {
         </div>
         
         <div className="flex items-center space-x-3">
-          <div className={`flex items-center space-x-2 px-3 py-2 rounded-md border ${getStatusColor(machineStatus as MachineStatus || machine.status)}`}>
-            {getStatusIcon(machineStatus as MachineStatus || machine.status)}
-            <span className="font-medium capitalize">{(machineStatus || machine.status).replace('_', ' ')}</span>
+          <div className={`flex items-center space-x-2 px-3 py-2 rounded-md border ${getStatusColor(machineStatuses[id!] as MachineStatus || machine.status)}`}>
+            {getStatusIcon(machineStatuses[id!] as MachineStatus || machine.status)}
+            <span className="font-medium capitalize">{(machineStatuses[id!] || machine.status).replace('_', ' ')}</span>
           </div>
           
           {isEditing ? (

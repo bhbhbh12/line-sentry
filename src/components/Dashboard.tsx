@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { fetchDepartments, updateDepartmentOEE } from '../store/slices/departmentSlice';
+import { fetchFactoryStats, updateFactoryStatsLocal } from '../store/slices/analyticsSlice';
 import { useAuth } from '../context/AuthContext';
 import { ThemeContext } from '../App';
-import { Department } from '../types';
-import apiService from '../services/api';
 import socketService from '../services/socket';
 import { 
   Building2, 
@@ -16,22 +17,16 @@ import {
 } from 'lucide-react';
 
 const Dashboard: React.FC = () => {
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [factoryStats, setFactoryStats] = useState({
-    totalUnits: 0,
-    avgOEE: 0,
-    unclassifiedStoppages: 0,
-    activeMachines: 0
-  });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const dispatch = useAppDispatch();
+  const { departments, loading, error } = useAppSelector((state) => state.departments);
+  const { factoryStats } = useAppSelector((state) => state.analytics);
   const { user, isOperator } = useAuth();
   const { isDarkMode } = useContext(ThemeContext);
   const navigate = useNavigate();
 
   useEffect(() => {
-    fetchDepartments();
-    fetchFactoryStats();
+    dispatch(fetchDepartments(10));
+    dispatch(fetchFactoryStats());
     setupSocketListeners();
   }, []);
 
@@ -39,16 +34,16 @@ const Dashboard: React.FC = () => {
     socketService.connect();
 
     const handleProductionUpdate = () => {
-      fetchFactoryStats();
-      fetchDepartments();
+      dispatch(fetchFactoryStats());
+      dispatch(fetchDepartments(10));
     };
 
     const handleStoppageUpdate = () => {
-      fetchFactoryStats();
+      dispatch(fetchFactoryStats());
     };
 
     const handleMachineStateUpdate = () => {
-      fetchFactoryStats();
+      dispatch(fetchFactoryStats());
     };
 
     socketService.on('production-update', handleProductionUpdate);
@@ -62,37 +57,6 @@ const Dashboard: React.FC = () => {
       socketService.off('unclassified-stoppage-detected', handleStoppageUpdate);
       socketService.off('machine-state-update', handleMachineStateUpdate);
     };
-  };
-
-  const fetchDepartments = async () => {
-    try {
-      // Pass limit=10 parameter to get only 10 departments
-      const data = await apiService.getDepartment('?limit=10');
-      const departmentsWithOEE = await Promise.all(data.map(async (dept: any) => {
-        const stats = await apiService.getDepartmentStats(dept._id);
-        return { ...dept, avgOEE: stats.avgOEE };
-      }));
-
-      setDepartments(departmentsWithOEE);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch departments');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchFactoryStats = async () => {
-    try {
-      const stats = await apiService.getFactoryStats();
-      setFactoryStats({
-        totalUnits: stats.totalUnits,
-        avgOEE: stats.avgOEE,
-        unclassifiedStoppages: stats.unclassifiedStoppages,
-        activeMachines: stats.activeMachines
-      });
-    } catch (err) {
-      console.error('Failed to fetch factory stats:', err);
-    }
   };
 
   const handleDepartmentClick = (departmentId: string) => {
@@ -116,7 +80,7 @@ const Dashboard: React.FC = () => {
       }`}>
         <div className="flex items-center">
           <AlertTriangle className="h-4 w-4 mr-2" />
-          <span>{error}</span>
+          <span>{typeof error === 'string' ? error : 'An error occurred'}</span>
         </div>
       </div>
     );

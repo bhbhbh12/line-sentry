@@ -1,7 +1,14 @@
 import React, { useState, useEffect, useContext } from 'react';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { 
+  fetchReports, 
+  generateReport, 
+  emailReport, 
+  downloadReportPDF 
+} from '../store/slices/reportSlice';
+import { fetchDepartments } from '../store/slices/departmentSlice';
+import { fetchAllMachines } from '../store/slices/machineSlice';
 import { useAuth } from '../context/AuthContext';
-import { Department, Machine } from '../types';
-import apiService from '../services/api';
 import { 
   FileText, 
   Download, 
@@ -60,11 +67,10 @@ interface Report {
 const Reports: React.FC = () => {
   const { isAdmin } = useAuth();
   const { isDarkMode } = useContext(ThemeContext);
-  const [reports, setReports] = useState<Report[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [machines, setMachines] = useState<Machine[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
+  const dispatch = useAppDispatch();
+  const { reports, loading, generating } = useAppSelector((state) => state.reports);
+  const { departments } = useAppSelector((state) => state.departments);
+  const { machines } = useAppSelector((state) => state.machines);
   const [filters, setFilters] = useState({
     type: '',
     departmentId: '',
@@ -96,42 +102,14 @@ const Reports: React.FC = () => {
     : 'border-gray-300 text-gray-700 hover:bg-gray-50';
 
   useEffect(() => {
-    fetchData();
+    dispatch(fetchReports());
+    dispatch(fetchDepartments());
+    dispatch(fetchAllMachines());
   }, []);
 
   useEffect(() => {
-    fetchReports();
+    dispatch(fetchReports(filters));
   }, [filters]);
-
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      const [reportsData, departmentsData, machinesData] = await Promise.all([
-        apiService.getReports(),
-        apiService.getDepartments(),
-        apiService.getMachines()
-      ]);
-      
-      setReports(reportsData);
-      setDepartments(departmentsData);
-      setMachines(machinesData);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch data';
-      toast.error(message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchReports = async () => {
-    try {
-      const reportsData = await apiService.getReports(filters);
-      setReports(reportsData);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch reports';
-      toast.error(message);
-    }
-  };
 
   const handleGenerateReport = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -147,11 +125,9 @@ const Reports: React.FC = () => {
     }
     
     try {
-      setGenerating(true);
-      const report = await apiService.generateReport(reportForm);
-      setReports([report, ...reports]);
+      await dispatch(generateReport(reportForm));
       toast.success('Report generated successfully');
-      fetchReports();
+      dispatch(fetchReports(filters));
       
       // Reset form
       setReportForm({
@@ -164,19 +140,12 @@ const Reports: React.FC = () => {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to generate report';
       toast.error(message);
-    } finally {
-      setGenerating(false);
     }
   };
 
   const handleEmailReport = async (reportId: string) => {
     try {
-      await apiService.emailReport(reportId);
-      setReports(reports.map(r => 
-        r._id === reportId 
-          ? { ...r, emailSent: true, emailSentAt: new Date().toISOString() }
-          : r
-      ));
+      await dispatch(emailReport(reportId));
       toast.success('Report emailed successfully');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to email report';
@@ -186,7 +155,7 @@ const Reports: React.FC = () => {
 
   const handleDownloadPDF = async (reportId: string, reportType: string, startDate: string) => {
     try {
-      await apiService.downloadReportPDF(reportId, reportType, startDate);
+      await dispatch(downloadReportPDF({ reportId, reportType, startDate }));
       toast.success('PDF downloaded successfully');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to download PDF';
@@ -200,9 +169,20 @@ const Reports: React.FC = () => {
     }
 
     try {
-      await apiService.request(`/reports/${reportId}`, { method: 'DELETE' });
+      // Note: We need to add deleteReport to the slice
+      const response = await fetch(`http://localhost:3001/api/reports/${reportId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json',
+        },
+      });
       
-      setReports(reports.filter(r => r._id !== reportId));
+      if (!response.ok) {
+        throw new Error('Failed to delete report');
+      }
+      
+      dispatch(fetchReports(filters));
       toast.success('Report deleted successfully');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to delete report';

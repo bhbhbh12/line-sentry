@@ -2,8 +2,16 @@ import React, { useState, useEffect, useCallback, useContext } from 'react';
 import { useForm, FormProvider } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { 
+  fetchUsersAdmin, 
+  createUser, 
+  updateUser, 
+  deleteUser,
+  setFilters as setUserFilters
+} from '../store/slices/userSlice';
+import { fetchDepartments } from '../store/slices/departmentSlice';
 import { useAuth } from '../context/AuthContext';
-import apiService from '../services/api';
 import {
   Users as UsersIcon,
   User as UserIcon,
@@ -97,12 +105,11 @@ type EditUserFormData = z.infer<typeof editUserSchema>;
 const Users: React.FC = () => {
   const { isAdmin } = useAuth();
   const { isDarkMode } = useContext(ThemeContext);
-  const [usersData, setUsersData] = useState<UsersResponse | null>(null);
-  const [departments, setDepartments] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const dispatch = useAppDispatch();
+  const { users, loading, pagination, filters } = useAppSelector((state) => state.users);
+  const { departments } = useAppSelector((state) => state.departments);
   
   // Pagination and filtering states
-  const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
@@ -196,8 +203,6 @@ const Users: React.FC = () => {
 
   const fetchUsers = useCallback(async (page = 1, search = '', role = '', department = '', isActive = '') => {
     try {
-      setLoading(true);
-      
       const params = {
         page,
         limit: pageSize,
@@ -209,30 +214,14 @@ const Users: React.FC = () => {
         ...(isActive !== '' && { isActive })
       };
 
-      const data: UsersResponse = await apiService.getUsersAdmin(params);
-      setUsersData(data);
-      setCurrentPage(data.pagination.currentPage);
+      await dispatch(fetchUsersAdmin(params));
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch users';
-      toast.error(message);
-      console.error('Fetch users error:', err);
-    } finally {
-      setLoading(false);
+      // Error handling is done in the slice
     }
   }, [pageSize, sortBy, sortOrder]);
 
-  const fetchDepartments = async () => {
-    try {
-      const departmentsData = await apiService.getDepartments();
-      setDepartments(departmentsData);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch departments';
-      toast.error(message);
-    }
-  };
-
   useEffect(() => {
-    fetchDepartments();
+    dispatch(fetchDepartments());
   }, []);
 
   useEffect(() => {
@@ -246,7 +235,7 @@ const Users: React.FC = () => {
     }
 
     const timeout = setTimeout(() => {
-      if (searchTerm !== (usersData?.filters.search || '')) {
+      if (searchTerm !== (filters.search || '')) {
         fetchUsers(1, searchTerm, roleFilter, departmentFilter, statusFilter);
       }
     }, 500);
@@ -259,14 +248,13 @@ const Users: React.FC = () => {
   }, [searchTerm]);
 
   const handlePageChange = (page: number) => {
-    if (page >= 1 && usersData && page <= usersData.pagination.totalPages) {
+    if (page >= 1 && pagination && page <= pagination.totalPages) {
       fetchUsers(page, searchTerm, roleFilter, departmentFilter, statusFilter);
     }
   };
 
   const handlePageSizeChange = (newSize: number) => {
     setPageSize(newSize);
-    setCurrentPage(1);
     fetchUsers(1, searchTerm, roleFilter, departmentFilter, statusFilter);
   };
 
@@ -277,7 +265,6 @@ const Users: React.FC = () => {
     setStatusFilter('');
     setSortBy('createdAt');
     setSortOrder('desc');
-    setCurrentPage(1);
   };
 
   const handleCreateUser = createFormMethods.handleSubmit(async (formData) => {
@@ -288,13 +275,13 @@ const Users: React.FC = () => {
         userData.departmentId = undefined;
       }
 
-      await apiService.createUser(userData);
+      await dispatch(createUser(userData));
       
       setIsCreating(false);
       toast.success("User created successfully");
       
       // Refresh the current page
-      fetchUsers(currentPage, searchTerm, roleFilter, departmentFilter, statusFilter);
+      fetchUsers(pagination?.currentPage || 1, searchTerm, roleFilter, departmentFilter, statusFilter);
     } catch (err) {
       let message = 'Failed to create user';
       
@@ -335,12 +322,12 @@ const Users: React.FC = () => {
         updateData.departmentId = undefined;
       }
 
-      await apiService.updateUser(editingUser._id, updateData);
+      await dispatch(updateUser({ id: editingUser._id, data: updateData }));
       setEditingUser(null);
       toast.success("User updated successfully");
       
       // Refresh the current page
-      fetchUsers(currentPage, searchTerm, roleFilter, departmentFilter, statusFilter);
+      fetchUsers(pagination?.currentPage || 1, searchTerm, roleFilter, departmentFilter, statusFilter);
     } catch (err) {
       let message = 'Failed to update user';
       
@@ -363,11 +350,11 @@ const Users: React.FC = () => {
   const handleToggleStatus = async (id: string, isActive: boolean) => {
     try {
       setStatusTogglingId(id);
-      await apiService.updateUser(id, { isActive: !isActive });
+      await dispatch(updateUser({ id, data: { isActive: !isActive } }));
       toast.success(`User ${!isActive ? 'activated' : 'deactivated'} successfully`);
       
       // Refresh the current page
-      fetchUsers(currentPage, searchTerm, roleFilter, departmentFilter, statusFilter);
+      fetchUsers(pagination?.currentPage || 1, searchTerm, roleFilter, departmentFilter, statusFilter);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update user status';
       toast.error(message);
@@ -380,14 +367,14 @@ const Users: React.FC = () => {
     if (window.confirm('Are you sure you want to permanently delete this user? This action cannot be undone.')) {
       try {
         setDeletingId(id);
-        await apiService.deleteUser(id);
+        await dispatch(deleteUser(id));
         toast.success("User deleted successfully");
         
         // If we're on the last page and it becomes empty, go to previous page
-        if (usersData && usersData.users.length === 1 && currentPage > 1) {
-          fetchUsers(currentPage - 1, searchTerm, roleFilter, departmentFilter, statusFilter);
+        if (users.length === 1 && pagination && pagination.currentPage > 1) {
+          fetchUsers(pagination.currentPage - 1, searchTerm, roleFilter, departmentFilter, statusFilter);
         } else {
-          fetchUsers(currentPage, searchTerm, roleFilter, departmentFilter, statusFilter);
+          fetchUsers(pagination?.currentPage || 1, searchTerm, roleFilter, departmentFilter, statusFilter);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to delete user';
@@ -496,9 +483,6 @@ const Users: React.FC = () => {
       </div>
     );
   }
-
-  const users = usersData?.users || [];
-  const pagination = usersData?.pagination;
 
   return (
     <div className={`space-y-6 ${bgClass} min-h-screen p-4`}>
